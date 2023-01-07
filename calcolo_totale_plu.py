@@ -8,26 +8,36 @@ This is a temporary script file.
 # install with 'pip install pyserial'
 import serial.tools.list_ports
 import csv
+import os
 from datetime import date
 
-today = date.today()
-csv_file = f"totale_plu_{today}.csv"
+csv_file = "totale_plu.csv"
 
 
 def decode_byte_int(byte_string):
     return int(byte_string.decode("utf-8"))
               
 
-class PLU:
-    def __init__(self, numero_plu, numero_confezioni, totale_peso_grammi, totale_importo):
+class PLUDetails:
+    def __init__(self, numero_plu, nome, prezzo):
         self.numero_plu = numero_plu
+        self.nome = nome
+        self.prezzo = prezzo
+        
+class PLUTotal:
+    def __init__(self, numero_plu, nome, prezzo, numero_confezioni, totale_peso_grammi, totale_importo):
+        self.numero_plu = numero_plu
+        self.nome = nome
+        self.prezzo = prezzo
         self.numero_confezioni = numero_confezioni
         self.totale_peso_grammi = totale_peso_grammi
         self.totale_importo = totale_importo
     
-    def to_csv_row(self):
+    def to_array(self):
         return [
             self.numero_plu,
+            self.nome,
+            self.prezzo,
             self.numero_confezioni,
             self.totale_peso_grammi,
             self.totale_importo
@@ -44,19 +54,44 @@ class BilanciaManager:
         self.connection = serial.Serial(port.device)
         
     def get_plu(self, plu_number):
+        plu_details = self.get_plu_details(plu_number)
         request ="\x1by {}\r".format(plu_number).encode()
-        print(request)
+        print(f"PLUTotal Request: {request}")
         self.connection.write(request)
         response = self.connection.readline()
         r_split = response.split()
-        print(response)
-        plu = PLU(
+        print(f"PLUTotal Response: {response}")
+        plu = PLUTotal(
             decode_byte_int(r_split[1]),
+            plu_details.nome,
+            plu_details.prezzo,
             decode_byte_int(r_split[2]),
             decode_byte_int(r_split[3]),
             decode_byte_int(r_split[4])
             )
+        
         return plu
+    
+    def get_plu_details(self, plu_number):
+        request ="\x1bb {}\r".format(plu_number).encode()
+        print(f"PLU details Request: {request}")
+        self.connection.write(request)
+        response = self.connection.readline()
+        nome = response.decode("utf-8")[6:18].strip()
+        prezzo = response.decode("utf-8")[19:25].strip()
+        r_split = response.split()
+        print(f"PLU details Response: {response}")
+        plu_details = PLUDetails(
+            decode_byte_int(r_split[1]),
+            nome,
+            prezzo
+            )
+        return plu_details
+        
+    def clear_total(self):
+        request ="\x1bz \r".encode()
+        print(f"PLU Request: {request}")
+        self.connection.write(request)
         
     def disconnect(self):
         self.connection.close()
@@ -71,14 +106,20 @@ for plu_n in range(1, 33):
 
 bilancia.disconnect()
 
-with open(csv_file, 'w', newline='', encoding='UTF8') as f:
+file_exists = os.path.exists(csv_file)
+with open(csv_file, 'a', newline='', encoding='UTF8') as f:
     writer = csv.writer(f)
 
-    header = ["numero_plu", "numero_confezioni", "totale_peso_grammi", "totale_importo"]
-    writer.writerow(header)
+    if not file_exists:
+        header = ["data", "numero_plu", "nome", "prezzo", "numero_confezioni", "totale_peso_grammi", "totale_importo"]
+        writer.writerow(header)
 
+    today = date.today()
     # write the data
     for plu in all_plu:
-        writer.writerow(plu.to_csv_row())
+        row = [today]
+        row.extend(plu.to_array())
+        
+        writer.writerow(row)
         
     f.close()
